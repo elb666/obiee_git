@@ -6,11 +6,10 @@
 # Requirements:
 #  - Run as MW user
 #  - MW_HOME must be set
+#  - MW_HOME/.wl_connect must set
+#      - WEBLOGIC_URL
 #  - MW_HOME/.obieegit must set 
-#      - MY_GIT_REPO
-#  - MW_HOME/.obieegit can optionally set 
-#      - RPD_BASE_NAME
-#      - RPD_PASSWORD
+#      - BI_REPO
 # 
 # By: Eric Brown eric_brown@harvard.edu
 # Created: Fri May 20 2016
