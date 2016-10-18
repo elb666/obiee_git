@@ -1,0 +1,2 @@
+# Copy to $MW_HOME and update to t3://hostname:port for WL AdminServer.  
+export WEBLOGIC_URL="t3://localhost:7001"
