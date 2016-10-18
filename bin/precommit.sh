@@ -7,10 +7,7 @@
 #  - Run as MW user
 #  - MW_HOME must be set
 #  - MW_HOME/.obieegit must set 
-#      - OBIEE_GIT_REPO 
-#      - CATALOG_NAME
-#  - MW_HOME/.obieegit can optionally set 
-#      - RPD_PASSWORD
+#      - BI_REPO 
 # 
 # By: Eric Brown eric_brown@harvard.edu
 # Created: Fri May 20 2016
@@ -26,7 +23,7 @@ usage()
 	 - Run as MW user
  	 - MW_HOME must be set
 	 - MW_HOME/.obieegit must set 
-	   - OBIEE_GIT_HOME
+	   - BI_REPO
 	 - MW_HOME/.obieegit can optionally set 
 	   - RPD_PASSWORD
            - else user will be prompted for RPD password
