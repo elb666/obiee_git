@@ -3,6 +3,8 @@
 ## Summary
 OBIEE-Git is a package of scripts and tools to assist in getting your OBIEE development under source control.  Written for Bash.
 
+[Deploy OBIEE-Git in 5 Minutes](https://obiee1.com/2016/10/26/deploy-obiee-git-in-5-minutes/)
+
 ## Code Deployment
 1. Log into OBIEE host machine as OBIEE user
 2. Environment variable MW_HOME must be set.  If it isn't already automatically set in your environment, you can update your .bashrc with something like the following:
