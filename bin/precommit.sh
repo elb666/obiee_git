@@ -49,9 +49,9 @@ getoptions()
 
 bail()
 {
-	echo "$1" >&2
+	echo "ERROR: " "$1" >&2
 	echo "Aborting ${PROGNAME}." >&2
-	exit $2 
+	exit ${2:-$E_DEFAULT}
 }
 
 checkenv()
