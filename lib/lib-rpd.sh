@@ -203,3 +203,9 @@ getobjfname()      #@ getobjfname rpdxmlfile [git_rev]
 {
 	getobjfullname "$@"
 }
+
+isreorder()        #@ isreorder file1 file2
+{                  #@ returns 0 if file1 is just a reorder of file2
+                   #@ returns 1 otherwise
+	diff -q <(sort "$1") <(sort "$2") > /dev/null
+}
