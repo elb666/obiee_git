@@ -122,15 +122,13 @@ getobjparent() 	   #@ getobjparent rpdxmlfile [git_rev]
 	# now adjust the _parent so it points relatively to _obj
 	if [[ $(dirname "$_obj") == '.' ]]; then 
 		_prefix="../"
-	elif [[ $(dirname "$(dirname "$_obj")")  = '.' ]] ; then 
+	elif [[ $(dirname "$(dirname "$_obj")") == '.' ]] ; then 
 		_prefix=""
 	else 
 		_prefix="$(dirname "$(dirname "$_obj")")/" 
 	fi	
 	
-	_parent="$_prefix""$_parent"
-	
-	printf "%s\n" "$_parent"
+	printf "%s\n" "$_prefix$_parent"
 
 }
 
@@ -141,10 +139,7 @@ getobjpar()        #@ getobjparent rpdxmlfile [git_rev]
 
 getobjparentname() #@ getobjparentname rpdxmlfile [git_rev]
 {
-	local _obj="$1"
-	local _rev="$2"
-
-	getobjname "$(getobjparent "$_obj" "$_rev")" "$_rev"
+	getobjname "$(getobjparent "$1" "$2")" "$2"
 }
 
 getobjpname()      #@ getobjpname rpdxmlfile [git_rev]
@@ -209,3 +204,25 @@ isreorder()        #@ isreorder file1 file2
                    #@ returns 1 otherwise
 	diff -q <(sort "$1") <(sort "$2") > /dev/null
 }
+
+extractobj()
+{
+	# this matches the format of paths to rpd xml 
+	_regexp="[[:graph:]/]*[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}\\.xml"
+
+	grep -oE "$_regexp" <<<"$1"
+}
+
+replacepathwobjqname()
+{
+	line="$1"
+	commit="$2"
+
+	_obj="$(extractobj "$line")"	
+	_objqname="$(getobjqname $_obj $commit)"
+
+	line="${line/$_obj/$_objqname}"
+
+	printf '%s\n' "$line"
+}
+

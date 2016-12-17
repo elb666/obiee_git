@@ -4,18 +4,26 @@
 # ===================================================================== #
 # OBIEE Git Status is git status plus extract rpd objects names
 # Requirements:
+#	lib-rpd.sh must be accessible in PROGDIR/../lib/
+# 	grep
 # 
 # By: Eric Brown eric_brown@harvard.edu
-# Created: Fri May 20 2016
 # ===================================================================== #
+
+PROGNAME="${0##*/}"
+PROGDIR="${0%/*}"
 
 usage()
 {
     cat <<-EOF
-	Usage: $PROGNAME
+	Usage: $PROGNAME [OPTION]...
 	
-	OBIEE Git Status is git status plus extract rpd objects names
-	Requirements:
+	OBIEE Git Status is 'git status' with rpd xml filenames replaced
+	with the human readable name of the object they represent.
+	Options:
+	  -f                       show filename with object name
+	  -n                       no color
+	  -h                       show this message and exit
 EOF
 }
 
@@ -23,10 +31,13 @@ EOF
 getoptions()
 {
 	OPTIND=1
-	while getopts "v" OPT; do
+	while getopts "nfh" OPT; do
 		case $OPT in
-		v )
-			O_VERBOSE=1
+		f )
+			O_SHOWFILE=1
+				;;
+		n )
+			O_NOCOLOR=1
 				;;
 		* )
 			usage
@@ -45,42 +56,36 @@ bail()
 
 setglobalvars()
 {
-	PROGNAME="${0##*/}"
-	PROGDIR="${0%/*}"
 
 	# Exit status codes
 	SUCCESS=0
 	E_DEFAULT=1
 	E_ENVIRONMENT=99
 
-	TEMP_FILE1=/tmp/ogstatus1_$$.tmp
-	TEMP_FILE2=/tmp/ogstatus2_$$.tmp
+	BLOCK_INDEX=$((1))
 
-	let BLOCK_INDEX=1
+	if [[ $O_NOCOLOR != 1 ]] ; then
+		GREEN='\e[0;32m'
+		RED='\e[0;31m'
+		NOCOLOR='\e[m'
+	fi
 
-	GREEN='\e[0;32m'
-	RED='\e[0;31m'
-	NOCOLOR='\e[m'
-
-	REPO_ROOT="$(git rev-parse --show-toplevel)" 
-	[[ $REPO_ROOT ]] || bail "Failed to get path to Git repo."
-
-	# Source functions 
-	#	getobjname (returns rpd object name)
-	#	getobjtype (returns rpd object type)
-	#	getobjparent (returns relative path to rpd object parent)
-
+	# Source helpful functions 
 	. $PROGDIR/../lib/lib-rpd.sh || \
-		bail "Failed to source lib-rpd.sh"
+		bail "Failed to source lib-rpd.sh" $E_ENVIRONMENT
+
+	which grep > /dev/null || \
+		bail "which grep failed; ogstatus requires grep" $E_ENVIRONMENT
 }
 
-getoptions "$@"
-setglobalvars
-
-git status | while IFS= read  line; do
-#while IFS= read  line; do
-	_objqname=
-	_objstatus=
+setcolor()
+{
+	# when BLOCK_INDEX is 3, the next section will be red followed by no color
+	if [[ $line == *"Changes not staged"* ]] || \
+	   [[ $line == *"Untracked files"* ]] || \
+	   [[ $line == *"Unmerged paths"* ]];  then
+		 BLOCK_INDEX=3
+	fi
 
 	# if the line is blank, we're about to be in the next text block
         # so increment the block index
@@ -91,118 +96,75 @@ git status | while IFS= read  line; do
 	2 ) COLOR="$GREEN";;
 	3 ) COLOR="$NOCOLOR";;
 	4 ) COLOR="$RED";;
-	5 ) COLOR="$NOCOLOR";;
-	6 ) COLOR="$RED";;
 	* ) COLOR="$NOCOLOR";;
 	esac
-
+}
 	 
-	_regexp="[[:graph:]/]*[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}\\.xml"
+main()
+{
+	while IFS= read  line; do
+		_obj=
+		_objqname=
+		_objstatus=
+		_newline=
 
-	_obj="$(grep -oE "$_regexp" <<<"$line")"
+		setcolor "$line"
 
-	if [[ $_obj ]]; then
-		_objstatus="${line/:*/}"
+		# extract rpd file path from line
+		_obj="$(extractobj "$line")"
 
-		if [[ -e $_obj ]]; then  # if the file exists
-			_objqname="$(getobjqname "$_obj")"
-			_objtype="$(getobjtype "$_obj")"
-		else       # otherwise it has been deleted so read it from HEAD
-			_objqname="$(getobjqname "$_obj" HEAD)"
-			_objtype="$(getobjtype "$_obj" HEAD)"
+		if [[ $_obj ]]; then
+		# if there is an rpd object in the line, then
+		# line looks like "\tmodified: ......xml" or "\tdeleted: ....."
+		# so obj status (e.g. "modified") is the word(s) before 
+		# the colon.  extract the object status from the line:
+			_objstatus="${line/:*/}"
+			_objstatus="${_objstatus/$'\t'/}"
+
+			if [[ -e $_obj ]]; then  # if the file exists
+						 # read name from working dir
+				_newline="$(replacepathwobjqname "$line")"
+				_objtype="$(getobjtype "$_obj")"
+			else       # otherwise it has been deleted 
+				   # so read it from HEAD
+				_newline="$(replacepathwobjqname "$line" HEAD)"
+				_objtype="$(getobjtype "$_obj" HEAD)"
+			fi
+
+			# check for "reordered" files
+			if [[ $_objstatus == *modified ]] && \
+			    isreorder $_obj <(git show HEAD:./$_obj); then
+				_newline="${_newline/$'\t'modified: /$'\t'reordered:}"
+			fi
+		else
+			_newline="$line"
 		fi
 
-		if [[ $_objstatus == *modified ]] && \
-		    isreorder $_obj <(git show HEAD:$_obj); then
-			line="${line/$_objstatus/reordered}"
-			_objstatus="reordered"
+		# print objtype if it is different than previous 
+		# pass through loop
+		if [[ $_objtype != $OBJECT_TYPE_OLD ]]; then
+			echo "    $_objtype"
 		fi
-	fi
-	if [[ $_objtype != $OBJECT_TYPE_OLD ]]; then
-		echo "    $_objtype"
+
+		# print the line
+		echo -e "$COLOR$_newline"
+
+		# if showfile, then print the filename
+		if [[ $O_SHOWFILE = 1 ]] && [[ $_obj ]]; then
+			echo -e "$COLOR                       $_obj"
+		fi
+
 		OBJECT_TYPE_OLD="$_objtype"
-	fi
 
-	line="${line/$_obj/$_objqname}"
-	echo -e "$COLOR$line"
+	done  < <(git status)
 
-#		
-#		# if the file has been deleted, then we need to read the 
-#		# version from HEAD into a temp file so we can process it
-#		if [[ $line == *deleted* ]] ; then
-#			git show HEAD:$FILE_PATH > $TEMP_FILE1 ;
-#			TEST_FILE=$TEMP_FILE1 ;
-#		else
-#			TEST_FILE="$FILE_PATH"	
-#		fi
-#		
-#		# if the file has been modified, then check if the change is 
-#		# just a reordering
-#		if [[ $line == *modified* ]] ;  then
-#			if diff -q <(git show HEAD:$TEST_FILE | sort) \
-#				<(sort < $TEST_FILE) > /dev/null ;  then
-#				line="${line/modified/reordered}"
-#				fi
-#			fi
-#	
-#		# now get the object name, and qualify it if it is a 
-#		# Presentation object
-#		OBJECT_NAME="\"$( rpdoname $TEST_FILE )\""
-#		OBJECT_TYPE=$( rpdotype $TEST_FILE )
-#		
-#		# if OBJECT_TYPE has changed, then print the new OBJECT_TYPE
-#		if [[ "$OBJECT_TYPE" != "$OBJECT_TYPE_OLD" ]]; then
-#			 echo "Object type: $OBJECT_TYPE" ; 	
-#		fi
-#		
-#		# if OBJECT_TYPE is a presentation folder, prefix the output 
-#		# string with the subj area
-#		if [[ $OBJECT_TYPE == *Presentation* ]] || \
-#		   [[ $OBJECT_TYPE == *LogicalTableSource* ]]; then
-#			PARENT_PATH=$( rpdoparent $TEST_FILE )
-#		
-#			# if the object has been deleted and we're reading 
-#			# from temp file, # then we need to adjust PARENT_PATH
-#			if [[ $line == *deleted* ]]; then
-#				PARENT_PATH=repository/oracle/bi/server/base$PARENT_PATH
-#			fi
-#	
-#			# if the parent has been deleted, then we need to read 
-#			# the version from HEAD into the second temp file
-#			if [[ ! -f $PARENT_PATH ]] ; then
-#				git show HEAD:$PARENT_PATH > $TEMP_FILE2 ;
-#				PARENT_PATH=$TEMP_FILE2 ;
-#			fi
-#	
-#			SUBJECT_AREA=$( rpdoname $PARENT_PATH )
-#			OBJECT_NAME=\"$SUBJECT_AREA\".$OBJECT_NAME
-#	
-#		fi
-#	
-#		line="${line/$FILE_PATH/$OBJECT_NAME}"
-#	
-#		#update the OBJECT_TYPE_OLD for comparison on loop
-#		OBJECT_TYPE_OLD=$OBJECT_TYPE ;
-#	
-#	fi
-#	echo  -e "$COLOR""$line"
-#	[[ $O_VERBOSE == 1 ]] && [[ $FILE_PATH ]] && echo -e "\t$FILE_PATH"
-#	
-#	if [[ $line == *unstage* ]]  || 
-#	   [[ $line == *"Changes to be committed"* ]] ; then
-#		COLOR="$GREEN"
-#	elif [[ $line == *discard* ]] ||
-#	     [[ $line == *"to mark resolution"* ]] ||
-#	     [[ $line == *include* ]] ; then
-#		COLOR="$RED"
-#	fi
-#	
-#	FILE_PATH=
+	exit
+}
 
-#done  < <(git status)
-done
+getoptions "$@"
 
-# Clean up
-#rm $TEMP_FILE1 $TEMP_FILE2 &> /dev/null
-#echo -ne $NOCOLOR
-exit
+setglobalvars
+
+main
+
+
