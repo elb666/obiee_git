@@ -1,0 +1,174 @@
+#!/bin/bash
+# oglog
+
+# ===================================================================== #
+# OBIEE Git Log is git log --name-status plus extract rpd objects names
+# Requirements:
+#	lib-rpd.sh must be accessible in PROGDIR/../lib/
+# 	grep
+# 
+# By: Eric Brown eric_brown@harvard.edu
+# ===================================================================== #
+
+PROGNAME="${0##*/}"
+PROGDIR="${0%/*}"
+
+usage()
+{
+    cat <<-EOF
+	Usage: $PROGNAME [OPTION]...
+	
+	OBIEE Git Log is 'git log --name-status' with rpd xml filenames 
+        replaced with the human readable name of the object they represent.
+	Options:
+	  -f                       show filename with object name
+	  -n                       no color
+	  -h                       show this message and exit
+EOF
+}
+
+
+getoptions()
+{
+	OPTIND=1
+	while getopts "nfh" OPT; do
+		case $OPT in
+		f )
+			O_SHOWFILE=1
+				;;
+		n )
+			O_NOCOLOR=1
+				;;
+		* )
+			usage
+			exit $E_DEFAULT
+			;;
+		esac
+	done
+}
+
+bail()
+{
+	echo "ERROR: " "$1" >&2
+	echo "Aborting ${PROGNAME}." >&2
+	exit ${2:-$E_DEFAULT}
+}
+
+setglobalvars()
+{
+
+	# Exit status codes
+	SUCCESS=0
+	E_DEFAULT=1
+	E_ENVIRONMENT=99
+
+#	BLOCK_INDEX=$((1))
+#
+#	if [[ $O_NOCOLOR != 1 ]] ; then
+#		GREEN='\e[0;32m'
+#		RED='\e[0;31m'
+#		NOCOLOR='\e[m'
+#	fi
+#
+	# Source helpful functions 
+	. $PROGDIR/../lib/lib-rpd.sh || \
+		bail "Failed to source lib-rpd.sh" $E_ENVIRONMENT
+
+	which grep > /dev/null || \
+		bail "which grep failed; ogstatus requires grep" $E_ENVIRONMENT
+}
+
+#setcolor()
+#{
+#	# when BLOCK_INDEX is 3, the next section will be red followed by no color
+#	if [[ $line == *"Changes not staged"* ]] || \
+#	   [[ $line == *"Untracked files"* ]] || \
+#	   [[ $line == *"Unmerged paths"* ]];  then
+#		 BLOCK_INDEX=3
+#	fi
+#
+#	# if the line is blank, we're about to be in the next text block
+#        # so increment the block index
+#	[[ $line ]] || ((BLOCK_INDEX++)) 
+#
+#	case $BLOCK_INDEX in
+#	1 ) COLOR="$NOCOLOR";;
+#	2 ) COLOR="$GREEN";;
+#	3 ) COLOR="$NOCOLOR";;
+#	4 ) COLOR="$RED";;
+#	* ) COLOR="$NOCOLOR";;
+#	esac
+#}
+#	 
+main()
+{
+	while IFS= read  line; do
+		_obj=
+		_objqname=
+		_objstatus=
+		_newline=
+
+#		setcolor "$line"
+
+		# extract rpd file path from line
+		_obj="$(extractobj "$line")"
+
+		if [[ $_obj ]]; then
+		# looking for lines that look like
+		# M   ad9a4360-0c5d-1000-b54b-0a2004f70000.xml
+		# so obj status (i.e. A, M or D) is the first letter
+		# the colon.  extract the object status from the line:
+			_objstatus="${line:1:1}"
+
+			if [[ $_objstatus != D ]]; then  # if the file wasn't 
+                                         # deleted then read name from commit
+				_newline="$(replacepathwobjqname "$line" "$_commit")"
+				_objtype="$(getobjtype "$_obj" "$_commit")"
+			else       # otherwise it has been deleted 
+				   # so try to read it from _commit's parents
+				for ref in $(git rev-parse "$_commit"^@); do
+					replacepathwobjqname "$line" "$ref" > /dev/null
+					[[ $? ]] || continue
+					_newline="$(replacepathwobjqname "$line" "$ref")"
+					_objtype="$(getobjtype "$_obj" "$ref")"
+					break
+				done
+			fi
+
+#			# check for "reordered" files
+#			if [[ $_objstatus == *modified ]] && \
+#			    isreorder $_obj <(git show HEAD:./$_obj); then
+#				_newline="${_newline/$'\t'modified: /$'\t'reordered:}"
+#			fi
+		else
+			_newline="$line"
+		fi
+
+		# print objtype if it is different than previous 
+		# pass through loop
+		if [[ $_objtype != $OBJECT_TYPE_OLD ]]; then
+			echo "    $_objtype"
+		fi
+
+		# print the line
+		echo -e "$COLOR$_newline"
+
+		# if showfile, then print the filename
+		if [[ $O_SHOWFILE = 1 ]] && [[ $_obj ]]; then
+			echo -e "$COLOR            $_obj"
+		fi
+
+		OBJECT_TYPE_OLD="$_objtype"
+
+	done  < <(git log --color=always --name-status) | less -r -X
+
+	exit
+}
+
+getoptions "$@"
+
+setglobalvars
+
+main
+
+

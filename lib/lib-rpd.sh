@@ -226,3 +226,37 @@ replacepathwobjqname()
 	printf '%s\n' "$line"
 }
 
+getreporoot()
+{
+	git rev-parse --show-toplevel
+}
+
+clearreorders() 
+{
+	cd "$(getreporoot)" || return 1
+	
+	# Read filenames of modified repository files from git diff
+	while read -r file_status test_file ; do
+	        # if it is the same as the original when reordered, then go checkout the original
+	        if diff -q <(git show HEAD:$test_file | sort) <(sort < $test_file) > /dev/null ;  then
+		        echo "Resetting" $(getobjtype $test_file) \"$(getobjname $(getobjparent $test_file))\".\"$(getobjname $test_file)\"
+                        git checkout HEAD -- $test_file;
+                fi
+        done < <( git diff --name-status  --cached HEAD -- repository/oracle | grep '^M' )
+} 
+
+cleargroups()
+{
+	cd "$(getreporoot)" || return 1
+	
+	git reset -- repository/oracle/bi/server/base/Group
+	git clean -fd -- repository/oracle/bi/server/base/Group
+	git co HEAD -- repository/oracle/bi/server/base/Group
+}
+
+clearvariables()
+{
+	cd "$(getreporoot)" || return 1
+	
+	git co HEAD -- repository/oracle/bi/server/base/Variable
+}

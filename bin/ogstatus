@@ -10,9 +10,6 @@
 # By: Eric Brown eric_brown@harvard.edu
 # ===================================================================== #
 
-PROGNAME="${0##*/}"
-PROGDIR="${0%/*}"
-
 usage()
 {
     cat <<-EOF
@@ -57,17 +54,25 @@ bail()
 setglobalvars()
 {
 
+	ARG0="$0"
+
+	while [[ -h $ARG0 ]]; do
+		ARG0="$(readlink "$ARG0")"
+	done
+
+	PROGNAME="${ARG0##*/}"
+	PROGDIR="${ARG0%/*}"
+
 	# Exit status codes
 	SUCCESS=0
 	E_DEFAULT=1
 	E_ENVIRONMENT=99
 
-	BLOCK_INDEX=$((1))
+	getoptions "$@"
 
 	if [[ $O_NOCOLOR != 1 ]] ; then
-		GREEN='\e[0;32m'
-		RED='\e[0;31m'
-		NOCOLOR='\e[m'
+		ORIGCOLORSTAT="$(git config --get color.status)"
+		git config color.status always
 	fi
 
 	# Source helpful functions 
@@ -78,28 +83,6 @@ setglobalvars()
 		bail "which grep failed; ogstatus requires grep" $E_ENVIRONMENT
 }
 
-setcolor()
-{
-	# when BLOCK_INDEX is 3, the next section will be red followed by no color
-	if [[ $line == *"Changes not staged"* ]] || \
-	   [[ $line == *"Untracked files"* ]] || \
-	   [[ $line == *"Unmerged paths"* ]];  then
-		 BLOCK_INDEX=3
-	fi
-
-	# if the line is blank, we're about to be in the next text block
-        # so increment the block index
-	[[ $line ]] || ((BLOCK_INDEX++)) 
-
-	case $BLOCK_INDEX in
-	1 ) COLOR="$NOCOLOR";;
-	2 ) COLOR="$GREEN";;
-	3 ) COLOR="$NOCOLOR";;
-	4 ) COLOR="$RED";;
-	* ) COLOR="$NOCOLOR";;
-	esac
-}
-	 
 main()
 {
 	while IFS= read  line; do
@@ -107,8 +90,6 @@ main()
 		_objqname=
 		_objstatus=
 		_newline=
-
-		setcolor "$line"
 
 		# extract rpd file path from line
 		_obj="$(extractobj "$line")"
@@ -147,24 +128,33 @@ main()
 		fi
 
 		# print the line
-		echo -e "$COLOR$_newline"
+		echo -e "$_newline"
 
 		# if showfile, then print the filename
 		if [[ $O_SHOWFILE = 1 ]] && [[ $_obj ]]; then
-			echo -e "$COLOR                       $_obj"
+			echo -e "                       $_obj"
 		fi
 
 		OBJECT_TYPE_OLD="$_objtype"
 
-	done  < <(git status)
+	done  < <(git status )
 
 	exit
 }
 
-getoptions "$@"
+cleanup()
+{
+	if [[ $ORIGCOLORSTAT ]]; then
+		git config color.status $ORIGCOLORSTAT
+	else
+		git config --unset color.status
+	fi
+}
 
-setglobalvars
+trap 'cleanup' 0 1 2 3 4 5 12 15
+
+setglobalvars "$@"
 
 main
 
-
+cleanup
