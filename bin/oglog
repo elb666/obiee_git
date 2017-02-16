@@ -16,13 +16,15 @@ PROGDIR="${0%/*}"
 usage()
 {
     cat <<-EOF
-	Usage: $PROGNAME [OPTION]...
+	Usage: $PROGNAME [OPTION]... [Git revision]
 	
 	OBIEE Git Log is 'git log --name-status' with rpd xml filenames 
         replaced with the human readable name of the object they represent.
+	Optional Git revision (sha1, refname, etc.) can be passed
 	Options:
 	  -f                       show filename with object name
 	  -n                       no color
+	  -a                       pass --all option to git log
 	  -h                       show this message and exit
 EOF
 }
@@ -31,7 +33,7 @@ EOF
 getoptions()
 {
 	OPTIND=1
-	while getopts "nfh" OPT; do
+	while getopts "anfh" OPT; do
 		case $OPT in
 		f )
 			O_SHOWFILE=1
@@ -39,12 +41,17 @@ getoptions()
 		n )
 			O_NOCOLOR=1
 				;;
+		a )
+			O_ALL=1
+				;;
 		* )
 			usage
 			exit $E_DEFAULT
 			;;
 		esac
 	done
+        shift $((OPTIND - 1))
+	_gitref="$1"
 }
 
 bail()
@@ -62,14 +69,6 @@ setglobalvars()
 	E_DEFAULT=1
 	E_ENVIRONMENT=99
 
-#	BLOCK_INDEX=$((1))
-#
-#	if [[ $O_NOCOLOR != 1 ]] ; then
-#		GREEN='\e[0;32m'
-#		RED='\e[0;31m'
-#		NOCOLOR='\e[m'
-#	fi
-#
 	# Source helpful functions 
 	. $PROGDIR/../lib/lib-rpd.sh || \
 		bail "Failed to source lib-rpd.sh" $E_ENVIRONMENT
@@ -78,39 +77,22 @@ setglobalvars()
 		bail "which grep failed; ogstatus requires grep" $E_ENVIRONMENT
 }
 
-#setcolor()
-#{
-#	# when BLOCK_INDEX is 3, the next section will be red followed by no color
-#	if [[ $line == *"Changes not staged"* ]] || \
-#	   [[ $line == *"Untracked files"* ]] || \
-#	   [[ $line == *"Unmerged paths"* ]];  then
-#		 BLOCK_INDEX=3
-#	fi
-#
-#	# if the line is blank, we're about to be in the next text block
-#        # so increment the block index
-#	[[ $line ]] || ((BLOCK_INDEX++)) 
-#
-#	case $BLOCK_INDEX in
-#	1 ) COLOR="$NOCOLOR";;
-#	2 ) COLOR="$GREEN";;
-#	3 ) COLOR="$NOCOLOR";;
-#	4 ) COLOR="$RED";;
-#	* ) COLOR="$NOCOLOR";;
-#	esac
-#}
-#	 
 main()
 {
+	_commitregexp="[[:xdigit:]]{40}"
+
 	while IFS= read  line; do
 		_obj=
 		_objqname=
 		_objstatus=
 		_newline=
 
-#		setcolor "$line"
 
-		# extract rpd file path from line
+		if [[ $line =~ $_commitregexp ]]; then
+			_commit=$(grep -oE "$_commitregexp" <<< $line)
+		fi
+		
+		# extract rpd file path from line if there is an rpd file path
 		_obj="$(extractobj "$line")"
 
 		if [[ $_obj ]]; then
@@ -118,14 +100,17 @@ main()
 		# M   ad9a4360-0c5d-1000-b54b-0a2004f70000.xml
 		# so obj status (i.e. A, M or D) is the first letter
 		# the colon.  extract the object status from the line:
-			_objstatus="${line:1:1}"
+			_objstatus="${line:0:1}"
 
 			if [[ $_objstatus != D ]]; then  # if the file wasn't 
+
                                          # deleted then read name from commit
+
 				_newline="$(replacepathwobjqname "$line" "$_commit")"
 				_objtype="$(getobjtype "$_obj" "$_commit")"
 			else       # otherwise it has been deleted 
 				   # so try to read it from _commit's parents
+
 				for ref in $(git rev-parse "$_commit"^@); do
 					replacepathwobjqname "$line" "$ref" > /dev/null
 					[[ $? ]] || continue
@@ -151,16 +136,16 @@ main()
 		fi
 
 		# print the line
-		echo -e "$COLOR$_newline"
+		echo -e "$_newline"
 
 		# if showfile, then print the filename
 		if [[ $O_SHOWFILE = 1 ]] && [[ $_obj ]]; then
-			echo -e "$COLOR            $_obj"
+			echo -e "            $_obj"
 		fi
 
 		OBJECT_TYPE_OLD="$_objtype"
 
-	done  < <(git log --color=always --name-status) | less -r -X
+	done  < <(git log --color=always --name-status ${O_ALL:+--all} $_gitref) | less -r -X
 
 	exit
 }

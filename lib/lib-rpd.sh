@@ -20,7 +20,7 @@ getobjname()  	   #@ getobjname rpdxmlfile [git_rev]
 	local _rev="$2"
 	local _objname
 
-	[[ $_rev ]] && getobjname <(git show $_rev:./"$_obj") && return
+	[[ $_rev ]] && getobjname <(git show $_rev:./"$_obj" 2> /dev/null) && return
 	
 	_objname="$(getline2 "$_obj")"
 
@@ -37,7 +37,7 @@ getobjtype()  	   #@ getobjtype rpdxmlfile [git_rev]
 	local _rev="$2"
 	local _rpdobjtype
 
-	[[ $_rev ]] && getobjtype <(git show $_rev:./"$_obj") && return
+	[[ $_rev ]] && getobjtype <(git show $_rev:./"$_obj" 2> /dev/null) && return
 	
 	_rpdobjtype="$(getline2 "$_obj")"
 	_rpdobjtype="${_rpdobjtype#*<}"
@@ -102,7 +102,7 @@ getobjparent() 	   #@ getobjparent rpdxmlfile [git_rev]
 	esac
  
 	if [[ $_rev ]]; then
-		_parent="$(getline2 <(git show "$_rev":./"$_obj"))" 
+		_parent="$(getline2 <(git show "$_rev":./"$_obj" 2> /dev/null))"
 	else
 		_parent="$(getline2 "$_obj")" 
 	fi
