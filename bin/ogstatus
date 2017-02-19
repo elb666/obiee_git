@@ -27,6 +27,9 @@ EOF
 
 getoptions()
 {
+	O_SHOWFILE=
+	O_NOCOLOR=
+
 	OPTIND=1
 	while getopts "nfh" OPT; do
 		case $OPT in
@@ -42,6 +45,8 @@ getoptions()
 			;;
 		esac
 	done
+        shift $((OPTIND - 1))
+	_gitref="$1"
 }
 
 bail()
@@ -53,7 +58,6 @@ bail()
 
 setglobalvars()
 {
-
 	ARG0="$0"
 
 	while [[ -h $ARG0 ]]; do
@@ -91,7 +95,7 @@ main()
 		_objstatus=
 		_newline=
 
-		# extract rpd file path from line
+		# extract rpd file path from line if there is an rpd file path
 		_obj="$(extractobj "$line")"
 
 		if [[ $_obj ]]; then

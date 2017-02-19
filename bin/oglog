@@ -10,9 +10,6 @@
 # By: Eric Brown eric_brown@harvard.edu
 # ===================================================================== #
 
-PROGNAME="${0##*/}"
-PROGDIR="${0%/*}"
-
 usage()
 {
     cat <<-EOF
@@ -32,6 +29,10 @@ EOF
 
 getoptions()
 {
+	O_SHOWFILE=
+	O_COLOR=1
+	O_ALL=
+
 	OPTIND=1
 	while getopts "anfh" OPT; do
 		case $OPT in
@@ -39,7 +40,7 @@ getoptions()
 			O_SHOWFILE=1
 				;;
 		n )
-			O_NOCOLOR=1
+			O_COLOR=
 				;;
 		a )
 			O_ALL=1
@@ -63,11 +64,21 @@ bail()
 
 setglobalvars()
 {
+	ARG0="$0"
+
+	while [[ -h $ARG0 ]]; do
+		ARG0="$(readlink "$ARG0")"
+	done
+
+	PROGNAME="${ARG0##*/}"
+	PROGDIR="${ARG0%/*}"
 
 	# Exit status codes
 	SUCCESS=0
 	E_DEFAULT=1
 	E_ENVIRONMENT=99
+
+	getoptions "$@"
 
 	# Source helpful functions 
 	. $PROGDIR/../lib/lib-rpd.sh || \
@@ -103,14 +114,11 @@ main()
 			_objstatus="${line:0:1}"
 
 			if [[ $_objstatus != D ]]; then  # if the file wasn't 
-
                                          # deleted then read name from commit
-
 				_newline="$(replacepathwobjqname "$line" "$_commit")"
 				_objtype="$(getobjtype "$_obj" "$_commit")"
 			else       # otherwise it has been deleted 
 				   # so try to read it from _commit's parents
-
 				for ref in $(git rev-parse "$_commit"^@); do
 					replacepathwobjqname "$line" "$ref" > /dev/null
 					[[ $? ]] || continue
@@ -120,11 +128,6 @@ main()
 				done
 			fi
 
-#			# check for "reordered" files
-#			if [[ $_objstatus == *modified ]] && \
-#			    isreorder $_obj <(git show HEAD:./$_obj); then
-#				_newline="${_newline/$'\t'modified: /$'\t'reordered:}"
-#			fi
 		else
 			_newline="$line"
 		fi
@@ -145,15 +148,11 @@ main()
 
 		OBJECT_TYPE_OLD="$_objtype"
 
-	done  < <(git log --color=always --name-status ${O_ALL:+--all} $_gitref) | less -r -X
+	done  < <(git log ${O_COLOR:+--color} --name-status ${O_ALL:+--all} $_gitref) | less -r -X
 
 	exit
 }
 
-getoptions "$@"
-
-setglobalvars
+setglobalvars "$@"
 
 main
-
-
