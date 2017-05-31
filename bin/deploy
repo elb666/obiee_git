@@ -1,16 +1,5 @@
 #!/bin/bash
-# deploy.sh
-
-# ===================================================================== #
-# Main deployment script for OBIEE-Git 
-# Requirements:
-#  - Run as MW user
-#  - MW_HOME must be set
-#  - MW_HOME/.wl_connect must set
-#      - WEBLOGIC_URL
-#  - MW_HOME/.obieegit must set 
-#      - BI_REPO
-# 
+# deploy
 # By: Eric Brown eric_brown@harvard.edu
 # Created: Fri May 20 2016
 # ===================================================================== #
@@ -18,93 +7,204 @@
 usage()
 {
     cat <<-EOF
-	Usage: $PROGNAME [-n]
+	Usage: $PROGNAME [OPTIONS]
 	
-	Main deployment script for OBIEE-Git 
-	Requirements:
-	 - Run as MW user
- 	 - MW_HOME must be set
-	 - MW_HOME/.wl_connect must set
-	   - WEBLOGIC_URL
-	 - MW_HOME/.obieegit must set 
-	   - BI_REPO
+	Main deployment script for OBIEE Git. Must be run as MW user. Environment
+	variable \$MW_HOME must be set.
+
 	Options:
-	 -n	don't convert rpd
+	          -h                     display this message and exit
+	          -v                     be verbose
+	          -n                     don't convert rpd. deploy the rpd at 
+	                                 \$BI_REPO/repository/\${RPD_BASE_NAME}.rpd
+
 EOF
+}
+
+setglobalvars()
+{
+	ARG0="$0"
+	
+	# if script was called by link, resolve the link until we get zomething real
+	while [[ -h $ARG0 ]]; do
+		ARG0="$(readlink "$ARG0")"
+	done
+	
+	PROGNAME="${ARG0##*/}"
+	PROGDIR="${ARG0%/*}"
+	
+	echo -e "Starting $PROGNAME\n"
+
+	# Exit status codes:
+	SUCCESS=0
+	E_DEFAULT=1
+	E_ENVIRONMENT=2
+	E_SCRIPT_ERROR=99
+
+	CLEANUP_COUNT=0
+}
+
+bail()
+{	# bail "error message" [exit status code]
+	# prints error message to stderr and exits with exit status code if 
+	# passed or $E_DEFAULT if set or else 1.
+
+	local _errorcode=$(())
+
+	if [[ $2 ]]; then 
+		_errorcode=$2
+	elif [[ $E_DEFAULT ]]; then 
+		_errorcode=$E_DEFAULT
+	else 
+		_errorcode=1
+	fi
+
+	if [[ $LOGGING_ENABLED = Y ]]; then 
+		logerror "$1"
+	fi
+
+	echo -e "ERROR:" "$1" >&2
+
+	exit $_errorcode
+}
+
+echoandlog()
+{
+	echo -e "$@\n"
+	loginfo "$@"
 }
 
 getoptions()
 {
+	O_NOCONVERT=0
+	O_VERBOSE=0
+	
 	OPTIND=1
-	while getopts "n" OPT ; do
+	while getopts "hnv" OPT ; do
 		case $OPT in 
+		h )
+			usage
+			exit
+			;;
 		n )
-			CONVERT=N
+			O_NOCONVERT=1
+			;;
+		v )
+			O_VERBOSE=1
+	#		export ECHO_LOG_MESSAGE=Y
 			;;
 		* )
 			usage
 			exit $E_DEFAULT
+			;;
 		esac
 	done
 
 	shift $((OPTIND-1))
 }
 
-bail()
+setandcheckothervariables()
 {
-    echo "$1" >&2
-    echo "Aborting ${PROGNAME}." >&2
-    exit $2 
-}
-
-checkenv()
-{
-	# check MW_HOME is set
-	[[ -d $MW_HOME ]] || bail "MW_HOME not set." $E_ENVIRONMENT
-}
-        
-setglobalvars()
-{
-	PROGNAME="${0##*/}"
-	#PROGDIR="${0%/*}"
-	PROGDIR="$MW_HOME/obiee_git/bin"
-
-	# Exit status codes:
-	SUCCESS=0
-	E_DEFAULT=1
-	E_ENVIRONMENT=99
-	E_CONVERSION=98
-	E_ARGS=97
-	E_DEPLOYMENT=96
-
-	# set path to OBIEE-Git lib
-	PROGLIB="$PROGDIR/../lib"
-	[[ -d $PROGLIB ]] || \
-		bail "Directory "$PROGLIB" must contain OBIEE-Git library"\
-		$E_ENVIRONMENT
-
-	# Set BI_REPO etc.
-	. $MW_HOME/.obieegit || \
-		bail "Failed to source \$MW_HOME/.obieegit." \
-		$E_ENVIRONMENT
-
-	[[ -d $BI_REPO ]] || \
-		bail "BI_REPO not set. Check $MW_HOME/.obieegit." \
-		$E_ENVIRONMENT
-
-	# set default values if not already set
-	CATALOG_NAME="${CATALOG_NAME:-catalog}" 
-	RPD_BASE_NAME="${RPD_BASE_NAME:-rpd}"
+	# Required environment variables
+	REQUIRED_ENV_VARS=( \
+		MW_HOME     \
+		)
 	
+	# Required config files to be read
+	CONFIG_FILES=( \
+		$MW_HOME/obieegit.conf
+		$MW_HOME/.wl_connect           \
+		$PROGDIR/../lib/lib-logging.sh \
+		)
+	
+	# Variables required to be set by config files
+	REQUIRED_CONFIG_VARS=( \
+		BI_REPO        \
+		WEBLOGIC_URL   \
+		)
+	
+	# Variables optionally set by config files and default values
+	declare -A OPTIONAL_CONFIG_VARS
+	OPTIONAL_CONFIG_VARS=( \
+		[CATALOG_NAME]=catalog  \
+		[RPD_BASE_NAME]=rpd     \
+		[RPD_PASSWORD]=""       \
+		[MY_LOGO]=              \
+		[CONVERSION_TIMOUT]=240 \
+		[WLST_TIMOUT]=240       \
+		[WLST_USER_STORED]=N    \
+		[LOGGING_ENABLED]=Y     \
+		[LOGDIR]="$MW_HOME/logs" \
+		[ECHO_LOG_MESSAGE]=N   \
+		)
+	
+	# Other required files
+	REQUIRED_FILES=( \
+		$PROGDIR/../lib/deploytemplate.py \
+		)
 
-	# Set WEBLOGIC_URL
-	. $MW_HOME/.wl_connect || \
-		bail "Failed to source \$MW_HOME/.wl_connect." \
-		$E_ENVIRONMENT
+	# Check environment and read config files
+	(( $O_VERBOSE > 0 )) && echo -e "Checking required environment variables."
+	for var in ${REQUIRED_ENV_VARS[@]}; do
+		if ! [[ ${!var} ]]; then
+			echo "ERROR: Environment variable $var is not set" >&2
+			exit $E_ENVIRONMENT
+		fi
+		(( $O_VERBOSE > 0 )) && echo -e "$var = ${!var}"
+	done
+	(( $O_VERBOSE > 0 )) && echo -e "Checking required environment variables complete.\n"
 
-	[[ $WEBLOGIC_URL ]] || \
-		bail "WEBLOGIC_URL not set. Check $MW_HOME/.wl_connect." \
-		$E_ENVIRONMENT
+	# Read config file(s)
+	(( $O_VERBOSE > 0 )) && echo -e "Reading required config files"
+	for file in ${CONFIG_FILES[@]}; do
+		(( $O_VERBOSE > 0 )) && echo -e "Reading $file"
+		. $file
+		if ! [[ $? ]]; then
+			echo "ERROR: Failed to source config file $file" >&2
+			exit $E_ENVIRONMENT
+		fi
+	done
+	(( $O_VERBOSE > 0 )) && echo -e "Reading required config files complete.\n"
+
+	# Verify config files set required variables
+	(( $O_VERBOSE > 0 )) && echo -e "Checking required config variables are set."
+	for var in ${REQUIRED_CONFIG_VARS[@]}; do
+		if ! [[ ${!var} ]]; then
+			echo "ERROR: Config file(s) did not set variable ${var}." >&2
+			echo "Check ${CONFIG_FILES[*]}" >&2
+			exit $E_ENVIRONMENT
+		fi
+		(( $O_VERBOSE > 0 )) && echo -e "$var = ${!var}"
+	done
+	(( $O_VERBOSE > 0 )) && echo -e "Checking required config variables complete.\n"
+
+	# set default values for optional config variables if not already set
+	(( $O_VERBOSE > 0 )) && echo -e "Checking optional config variables."
+	for var in ${!OPTIONAL_CONFIG_VARS[@]}; do
+		if ! [[ ${!var} ]]; then
+			(( $O_VERBOSE > 0 )) &&	echo -e "Setting $var to default value ${OPTIONAL_CONFIG_VARS[$var]:-[null]}"
+			eval export $var=${OPTIONAL_CONFIG_VARS[$var]}
+		else
+			(( $O_VERBOSE > 0 )) && echo -e "$var = ${!var}"
+		fi
+	done
+	(( $O_VERBOSE > 0 )) && echo -e "Checking optional config variables complete.\n"
+
+	# Verify can read other required files
+	(( $O_VERBOSE > 0 )) && echo -e "Checking can read other required files."
+	for file in ${REQUIRED_FILES[@]}; do
+		(( $O_VERBOSE > 0 )) && echo -e "Checking $file"
+		if ! [[ -r $file ]]; then
+			echo "ERROR: Cannot read file $file" 
+			exit $E_ENVIRONMENT
+		fi
+	done
+	(( $O_VERBOSE > 0 )) && echo -e "Checking can read other required files complete.\n"
+
+	if [[ $LOGGING_ENABLED = Y ]]; then
+		echo -e "NOTICE: Log file: $LOGFILE\n"
+		loginfo "Starting $PROGNAME"
+	fi
 }
 
 xmltorpd()         # xmltorpd xmldir rpd.rpd [rpd password]
@@ -118,53 +218,186 @@ xmltorpd()         # xmltorpd xmldir rpd.rpd [rpd password]
 
 convertxml()
 {
-	local _rpd="$BI_REPO/repository/$RPD_BASE_NAME.rpd"
+	local _rpd="$BI_REPO/repository/${RPD_BASE_NAME}.rpd"
 	local _xml_dir="$BI_REPO/repository"
 
-	echo -e "Converting xml to rpd...\n"
-	xmltorpd "$_xml_dir" "$_rpd" "$RPD_PASSWORD" || \
-		bail "Conversion failed." $E_CONVERSION
+	echoandlog "Converting xml to rpd."
 
-	echo  # need a blank line for aesthetics
+	if (( $O_VERBOSE > 0 )); then
+		echo -e "RPD source is $_xml_dir"
+		echo -e "RPD target is $_rpd\n"
+	fi
+
+	if [[ $RPD_PASSWORD ]]; then
+		# background the conversion
+		xmltorpd "$_xml_dir" "$_rpd" "$RPD_PASSWORD" & 
+		mypid=$!
+	
+		i=0
+		while echo -n "."; do
+	       		sleep 1
+			# if the conversion is done, then break
+	       		kill -0 $mypid > /dev/null 2>&1  || break
+			
+			# if the timeout has passed, then kill the conversion and bail
+			if (( ++i > $CONVERSION_TIMOUT )); then
+				pkill -P $mypid
+				bail "Conversion timed out after $CONVERSION_TIMOUT seconds."
+			fi
+		done
+	
+		# get the exit status of the the conversion
+		wait $mypid
+	else
+		# can't background conversion because will prompt for password
+		echo "NOTICE: after providing RPD password for conversion,"
+		echo -e "script will appear unresponsive until conversion completes.\n"
+		xmltorpd "$_xml_dir" "$_rpd"
+	fi
+		
+	exitstatus=$?
+	[[ $exitstatus = 0 ]] || \
+		bail "Conversion failed." 
+	
+	echoandlog "Conversion complete."
 }
 
 deployrpd()
 {
-	local _rpd="$BI_REPO/repository/$RPD_BASE_NAME.rpd"
+	echoandlog "Beginning RPD deployment..."
+
+	local _rpd="$BI_REPO/repository/${RPD_BASE_NAME}.rpd"
+	local _weblogic_url="$WEBLOGIC_URL"
+	local _rpd_password=
+
+	if [[ $RPD_PASSWORD ]]; then
+		_rpd_password="$RPD_PASSWORD"
+	else
+		echo -e "Enter RPD password (hidden):" 
+		read -r -s _rpd_password
+	fi
+
 
 	# read python script into variable
-	local _pythonscript="$(cat "$PROGLIB/deploytemplate.py")"
+	local _pythonscript="$(cat "$PROGDIR/../lib/deploytemplate.py")"
 
 	# replace for WEBLOGIC_URL, RPD, and RPD_PASSWORD
-	_pythonscript="${_pythonscript//%WEBLOGIC_URL%/$WEBLOGIC_URL}"
+	_pythonscript="${_pythonscript//%WEBLOGIC_URL%/$_weblogic_url}"
 	_pythonscript="${_pythonscript//%RPD%/$_rpd}"
-	_pythonscript="${_pythonscript//%RPD_PASSWORD%/$RPD_PASSWORD}"
+	_pythonscript="${_pythonscript//%RPD_PASSWORD%/$_rpd_password}"
 
-	. $MW_HOME/user_projects/domains/bifoundation_domain/bin/setDomainEnv.sh
-	. $MW_HOME/oracle_common/common/bin/setWlstEnv.sh
-	$MW_HOME/oracle_common/common/bin/wlst.sh \
-		<(printf "%s" "$_pythonscript") || \
-		bail "RPD deployment failed." $E_DEPLOYMENT
+	. $MW_HOME/user_projects/domains/bifoundation_domain/bin/setDomainEnv.sh > /dev/null
+	. $MW_HOME/oracle_common/common/bin/setWlstEnv.sh > /dev/null
+	
+	loginfo "Connecting to Weblogic with wlst"
 
-	echo 
+	# if verbose or if WLST will require input (i.e. user/password), don't background
+        if (( $O_VERBOSE > 0 )) || [[ $WLST_USER_STORED = N ]]; then
+		$MW_HOME/oracle_common/common/bin/wlst.sh \
+			<(printf "%s" "$_pythonscript") 
+		exitstatus=$?
+
+	else
+		# else (if not verbose) hide stdout and background...
+		$MW_HOME/oracle_common/common/bin/wlst.sh \
+			<(printf "%s" "$_pythonscript") > /dev/null &
+		mypid=$!
+	
+		# ...but print something while we wait so we know it's working
+		i=0
+		while echo -n "."; do
+       			sleep 1
+       			kill -0 $mypid > /dev/null 2>&1 || break
+
+			# if the timeout has passed, then kill the deployment and bail
+			if (( ++i > $WLST_TIMOUT )); then
+				pkill -P $mypid
+				bail "RPD deployment timed out after $WLST_TIMOUT seconds."
+			fi
+		done
+		echo
+		wait $mypid
+		exitstatus=$?
+	fi
+
+	[[ $exitstatus = 0 ]] || \
+		bail "RPD deployment failed." 
+
+	echoandlog "RPD deployment complete."
 }
+
+deploycatalog()
+{
+	echoandlog "Beginning catalog deployment."
+	
+	local _obips="$MW_HOME/instances/instance1/bifoundation/OracleBIPresentationServicesComponent/coreapplication_obips1"
+	local _obicat="$_obips/catalog/$CATALOG_NAME"
+	local _gitcat="$BI_REPO/catalog/$CATALOG_NAME"
+
+	for dir in root/shared root/system/metadata root/system/privs; do
+		ln -sfT $_gitcat/$dir $_obicat/$dir || \
+			bail "Failed to create symlink $_obicat/$dir to target $_gitcat/$dir"
+	done
+
+	echoandlog "Catalog deployment complete."
+}
+	
+deploybranding()
+{
+	echoandlog "Beginning branding deployment."
+	
+	local _obips="$MW_HOME/instances/instance1/bifoundation/OracleBIPresentationServicesComponent/coreapplication_obips1"
+	local _gitbranding="$BI_REPO/branding"
+
+	for dir in analyticsRes msgdb; do
+		ln -sfT $_gitbranding/$dir $_obips/$dir || \
+			bail "Failed to create symlink $_gitbranding/$dir to target $_obips/$dir"
+	done
+
+	echoandlog "Branding deployment complete."
+}
+
+cleanup()
+{
+	if (( CLEANUP_COUNT++ < 1 )); then
+		loginfo "Cleaning up"
+		[[ $mypid ]] && pkill -P $mypid
+		pkill -g 0
+	fi
+}
+
 
 main()
 {
-	echo -e "\nStarting OG deploy.\n"
-	getoptions "$@"
-	checkenv
-	setglobalvars
+	trap 'cleanup' 1 2 3 4 5 12 15
 
-        if [[ $CONVERT = N ]]; then
-		echo -e "Convert rpd bypassed.\n"
+	setglobalvars "$@" || \
+		bail "Function setglobalvars failed" $E_SCRIPT_ERROR
+
+	getoptions "$@" || \
+		bail "Function getoptions failed" $E_SCRIPT_ERROR
+
+	setandcheckothervariables || \
+		bail "Function setandcheckothervariables failed" $E_SCRIPT_ERROR
+
+        if [[ $O_NOCONVERT > 0 ]]; then
+		echoandlog "Convert rpd bypassed"
 	else 
-		convertxml
+		convertxml || \
+			bail "Function convertxml failed" $E_SCRIPT_ERROR
 	fi
 
-	deployrpd
+	deploybranding || \
+		bail "Function deploybranding failed" $E_SCRIPT_ERROR
 
-	echo -e "OG deploy complete.\n"
+	deployrpd || \
+		bail "Function deployrpd failed" $E_SCRIPT_ERROR
+
+	deploycatalog || \
+		bail "Function deploycatalog failed" $E_SCRIPT_ERROR
+
+	echoandlog "$PROGNAME complete."
+
 	exit $SUCCESS
 }
 

@@ -1,0 +1,268 @@
+#!/bin/bash
+# ogwrapper
+
+#-------------------------------------
+#  CONFIGURATION SECTION
+#
+CATALOG_NAME=
+RPD_BASE_NAME=
+RPD_PASSWORD=
+MW_USERS=([1]=mwuser1 [2]=mwuser2 [3]=mwuser3)
+WLST_USER_STORED=Y
+LOGGING_ENABLED=Y
+#
+#-------------------------------------
+
+usage()
+{
+    cat <<-EOF
+	Usage: $PROGNAME [OPTIONS] [SBXNO]
+
+	Wrapper script for obiee_git deploy and precommit for sandbox. Set mode
+	with option -D or -P. If both are passed, then the last value is used. 
+	Optionally pass SBXNO (e.g. 1) or be prompted. Environment variable 
+	BI_REPO must be set.
+
+	Modes:
+	  -D                       run in deploy mode
+	  -P                       run in precommit mode
+	Options:
+	  -h                       display this message and exit
+	  -v                       be verbose
+	  -n                       don't convert rpd; in deploy mode, use
+	                           \$BI_REPO/repository/\$RPD_BASE_NAME.rpd
+	Example:
+	$PROGNAME -vD 1            deploy verbosely to sbx 1
+
+EOF
+}
+
+setandcheckglobalvars()
+{
+	ARG0="$0"
+	
+	# if script was called by link, resolve the link until we get zomething real
+	while [[ -h $ARG0 ]]; do
+		ARG0="$(readlink "$ARG0")"
+	done
+	
+	PROGNAME="${ARG0##*/}"
+	PROGDIR="${ARG0%/*}"
+	
+	# Exit status codes:
+	SUCCESS=0
+	E_DEFAULT=1
+	E_SCRIPT_ERROR=99
+
+	CLEANUP_COUNT=0
+}
+
+bail()
+{       # bail "error message" [exit status code]
+        # prints error message to stderr and exits with exit status code if
+        # passed or $E_DEFAULT if set or else 1.
+
+        local _errorcode=$(())
+
+        if [[ $2 ]]; then
+                _errorcode=$2
+        elif [[ $E_DEFAULT ]]; then
+                _errorcode=$E_DEFAULT
+        else
+                _errorcode=1
+        fi
+
+        echo -e "ERROR:" "$1" >&2
+        exit $_errorcode
+}
+
+getoptionsandargs()
+{
+	O_NOCONVERT=0
+	O_VERBOSE=0
+	O_MODE=
+
+	SBXNO=
+	MW_USER=
+
+	OPTIND=1
+	while getopts "nvhDP" OPT; do
+		case $OPT in
+		n )
+			O_NOCONVERT=1
+			;;
+		v )
+			O_VERBOSE=1
+			;;
+		D )
+			O_MODE=DEPLOY
+			;;
+		P )
+			O_MODE=PRECOMMIT
+			;;
+		h )
+			usage
+			exit
+			;;
+		* )
+			usage
+			exit $E_DEFAULT
+			;;
+		esac
+	done
+
+        shift $((OPTIND - 1))
+
+	[[ $BI_REPO ]] || bail "Variable BI_REPO not set. Run $PROGNAME -h for usage."
+
+	[[ $O_MODE ]] || bail "Mode not set. Run $PROGNAME -h for usage."
+
+	# there should be at most 1 argument after the options
+	[[ $# > 1 ]] && bail "Too many arguments. Run $PROGNAME -h for usage."
+
+	# if there is an argument and it is valid sbxno, set MW_USER...
+	if [[ $1 ]]; then
+        	MW_USER=${MW_USERS[$1]}
+        	! [[ $MW_USER ]] && echo invalid sbxno
+	fi
+
+	# ...else, prompt for sbxno until valid value is passed
+	while ! [[ $MW_USER ]]; do
+		echo -e "Which sandbox? ${!MW_USERS[@]}"
+		read -r SBXNO
+		MW_USER=${MW_USERS[$SBXNO]}
+	done
+
+	(( $O_VERBOSE > 0 )) && echo -e "Running in $O_MODE mode.\n"
+	(( $O_VERBOSE > 0 )) && echo -e "MW_USER is $MW_USER\n"
+
+	return 0
+
+}
+
+checkbirepo()
+{
+	(( $O_VERBOSE > 0 )) && \
+		echo -e "BI Repo is ${BI_REPO}. Change environment variable BI_REPO to change.\n"
+	
+	echo -n "Validating BI Repo..."
+	(( $O_VERBOSE > 0 )) && echo -e "\n"
+	
+	# make sure BI Repo and essential sub directories exist
+	for dir in "" repository catalog branding; do
+		(( $O_VERBOSE > 0 )) && echo -n "Checking $BI_REPO/${dir}..."
+		if ! [[ -d $BI_REPO/${dir} ]]; then
+			echo -e "\n"
+			bail "$BI_REPO/$dir does not exist or is unaccessable."
+		fi
+		(( $O_VERBOSE > 0 )) && echo "OK"
+	done
+	
+	(( $O_VERBOSE > 0 )) && echo -e "\n\n"
+	echo -e "OK\n"
+}
+
+setandchecksbx()
+{
+	local mw_home=
+
+	# get mw_home for the MW_USER
+	mw_home="$(sudo su - $MW_USER -c 'echo $MW_HOME')"
+	[[ $mw_home ]] || \
+		bail "Failed to set MW_HOME. Make sure $MW_USER sets this environment variable."
+	
+	sudo su - $MW_USER -c 'ls $MW_HOME/obiee_git/ &> /dev/null' || \
+		bail "OBIEE Git directory (\$MW_HOME/obiee_git) for sandbox $SBXNO not found."
+
+
+	(( $O_VERBOSE > 0 )) && echo -e "MW home is $mw_home\n"
+	(( $O_VERBOSE > 0 )) && echo -e "Setting $mw_home/obieegit.conf\n"
+	
+	# write BI repo settings to sbx
+	cat > "$mw_home/obieegit.conf" <<-EOF
+	export BI_REPO="$BI_REPO"
+	export CATALOG_NAME="$CATALOG_NAME"
+	export RPD_BASE_NAME="$RPD_BASE_NAME"
+	export RPD_PASSWORD="$RPD_PASSWORD"
+	export LOGGING_ENABLED="$LOGGING_ENABLED"
+	export WLST_USER_STORED="$WLST_USER_STORED"
+	export LOGDIR="$mw_home/logs"
+	export MY_LOGO="$MY_LOGO"
+	EOF
+	[[ $? = 0 ]] || \
+		bail "Failed to write settings to MW_HOME/obieegit.conf for sandbox $SBXNO"
+}
+
+updatebirepoperms()
+{
+	
+	echo -n "Updating permissions in BI Repo...."
+	find "$BI_REPO" ! -user $USER -exec sudo chown -R $USER {} \;
+	find "$BI_REPO" ! -perm 777 -exec chmod 777 {} + ;
+	echo -e "done!\n"
+	
+}
+
+deploytosbx()
+{
+	local _cmd='$MW_HOME/obiee_git/bin/deploy'
+
+        if (( $O_NOCONVERT > 0 )); then
+		_cmd="$_cmd -n"
+	fi
+
+        if (( $O_VERBOSE > 0 )); then
+		_cmd="$_cmd -v"
+	fi
+
+	echo -e "Switching to user $MW_USER\n"
+
+	sudo su - $MW_USER -c "$_cmd" || \
+		bail "Failed to deploy to sbx." $E_DEFAULT
+}
+
+precommitfromsbx()
+{
+	local _cmd='$MW_HOME/obiee_git/bin/precommit'
+
+        if (( $O_NOCONVERT > 0 )); then
+		echo -e "Convert rpd bypassed.\n"
+		return 0
+	fi
+
+        if (( $O_VERBOSE > 0 )); then
+		_cmd="$_cmd -v"
+	fi
+
+	echo -e "Switching to user $MW_USER\n"
+
+	sudo su - $MW_USER -c "$_cmd" || \
+		bail "Failed to convert RPD." $E_DEFAULT
+}
+
+main()
+{
+	setandcheckglobalvars || bail "Function setandcheckglobalvars failed." $E_SCRIPT_ERROR
+	
+	getoptionsandargs "$@" || bail "Function getoptionsandargs failed." $E_SCRIPT_ERROR
+
+	checkbirepo || bail "Function checkbirepo failed." $E_SCRIPT_ERROR
+	
+	setandchecksbx || bail "Function setandchecksbx failed." $E_SCRIPT_ERROR
+	
+	if [[ $O_MODE = DEPLOY ]]; then
+		updatebirepoperms || bail "Function updatebirepoperms failed." $E_SCRIPT_ERROR
+		deploytosbx || bail "Function deploytosbx failed." $E_SCRIPT_ERROR
+	fi
+
+	if [[ $O_MODE = PRECOMMIT ]]; then
+		updatebirepoperms || bail "Function updatebirepoperms failed." $E_SCRIPT_ERROR
+		precommitfromsbx || bail "Function precommitfromsbx failed." $E_SCRIPT_ERROR
+		updatebirepoperms || bail "Function updatebirepoperms failed." $E_SCRIPT_ERROR
+		cd $BI_REPO
+		git add -A
+		ogstatus
+	fi
+}
+
+main "$@"

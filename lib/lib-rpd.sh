@@ -28,7 +28,6 @@ getobjname()  	   #@ getobjname rpdxmlfile [git_rev]
 	_objname="${_objname%%\"*}"
 
 	printf "%s\n" "$_objname"
-	return
 }
 
 getobjtype()  	   #@ getobjtype rpdxmlfile [git_rev]
@@ -44,7 +43,6 @@ getobjtype()  	   #@ getobjtype rpdxmlfile [git_rev]
 	_rpdobjtype="${_rpdobjtype%% *}"
 
 	printf "%s\n" "$_rpdobjtype"
-	return
 }
 
 getobjparent() 	   #@ getobjparent rpdxmlfile [git_rev]
@@ -210,7 +208,7 @@ extractobj()
 	# this matches the format of paths to rpd xml 
 	_regexp="[[:graph:]/]*[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}\\.xml"
 
-	grep -oE "$_regexp" <<<"$1"
+	[[ $1 =~ $_regexp ]] && printf '%s' "${BASH_REMATCH[0]}"
 }
 
 replacepathwobjqname()
@@ -226,28 +224,49 @@ replacepathwobjqname()
 	printf '%s\n' "$line"
 }
 
-getreporoot()
+getreporoot()     # returns repo root if in git repo; else nothing
 {
-	git rev-parse --show-toplevel
+	git rev-parse --show-toplevel 2> /dev/null
 }
 
 clearreorders() 
 {
-	cd "$(getreporoot)" || return 1
+	local _repo_root
+
+	_repo_root=$(getreporoot)
+	if [[ $_repo_root ]]; then
+		cd $_repo_root || return 1
+	else
+		echo "$FUNCNAME must be run in a git repo"
+		return 1
+	fi
 	
 	# Read filenames of modified repository files from git diff
 	while read -r file_status test_file ; do
+
+		# we only need to test M[odified] files
+		[[ $file_status = M ]] || continue
+
 	        # if it is the same as the original when reordered, then go checkout the original
-	        if diff -q <(git show HEAD:$test_file | sort) <(sort < $test_file) > /dev/null ;  then
-		        echo "Resetting" $(getobjtype $test_file) \"$(getobjname $(getobjparent $test_file))\".\"$(getobjname $test_file)\"
+	        if isreorder <(git show HEAD:$test_file) $test_file ;  then
+		        echo "Resetting" $(getobjtype $test_file) $(getobjqname $test_file)
                         git checkout HEAD -- $test_file;
                 fi
-        done < <( git diff --name-status  --cached HEAD -- repository/oracle | grep '^M' )
+
+        done < <( git status --porcelain -- repository/oracle )
 } 
 
 cleargroups()
 {
-	cd "$(getreporoot)" || return 1
+	local _repo_root
+
+	_repo_root=$(getreporoot)
+	if [[ $_repo_root ]]; then
+		cd $_repo_root || return 1
+	else
+		echo "$FUNCNAME must be run in a git repo"
+		return 1
+	fi
 	
 	git reset -- repository/oracle/bi/server/base/Group
 	git clean -fd -- repository/oracle/bi/server/base/Group
@@ -256,7 +275,20 @@ cleargroups()
 
 clearvariables()
 {
-	cd "$(getreporoot)" || return 1
+	local _repo_root
+
+	_repo_root=$(getreporoot)
+	if [[ $_repo_root ]]; then
+		cd $_repo_root || return 1
+	else
+		echo "$FUNCNAME must be run in a git repo"
+		return 1
+	fi
 	
 	git co HEAD -- repository/oracle/bi/server/base/Variable
+}
+
+clearvars()
+{
+	clearvariables "$@"
 }

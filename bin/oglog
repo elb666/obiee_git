@@ -1,11 +1,7 @@
 #!/bin/bash
 # oglog
-
-# ===================================================================== #
-# OBIEE Git Log is git log --name-status plus extract rpd objects names
 # Requirements:
 #	lib-rpd.sh must be accessible in PROGDIR/../lib/
-# 	grep
 # 
 # By: Eric Brown eric_brown@harvard.edu
 # ===================================================================== #
@@ -13,16 +9,21 @@
 usage()
 {
     cat <<-EOF
-	Usage: $PROGNAME [OPTION]... [Git revision]
+	Usage: $PROGNAME [OPTION] [git-log args]
 	
 	OBIEE Git Log is 'git log --name-status' with rpd xml filenames 
-        replaced with the human readable name of the object they represent.
-	Optional Git revision (sha1, refname, etc.) can be passed
+	replaced with the human readable name of the object they represent.
+	Optional git-log arguments will be passed to git log.
 	Options:
-	  -f                       show filename with object name
-	  -n                       no color
-	  -a                       pass --all option to git log
 	  -h                       show this message and exit
+	  -f                       show filename with object name
+	Examples:
+	  $PROGNAME -f -3          
+	                           return the last 3 commits with filenames
+	  $PROGNAME --all -- dir/  
+	                           return all commits that touch directory dir
+	  $PROGNAME --decorate
+	                           include branch names
 EOF
 }
 
@@ -30,29 +31,17 @@ EOF
 getoptions()
 {
 	O_SHOWFILE=
-	O_COLOR=1
-	O_ALL=
+	GITOPTS=
 
-	OPTIND=1
-	while getopts "anfh" OPT; do
-		case $OPT in
-		f )
-			O_SHOWFILE=1
-				;;
-		n )
-			O_COLOR=
-				;;
-		a )
-			O_ALL=1
-				;;
-		* )
-			usage
-			exit $E_DEFAULT
-			;;
-		esac
-	done
-        shift $((OPTIND - 1))
-	_gitref="$1"
+	if [[ $1 = "-h" ]]; then
+		usage
+		exit
+	elif [[ $1 = "-f" ]]; then
+		O_SHOWFILE=1
+		shift
+	fi
+
+	GITOPTS="$@"
 }
 
 bail()
@@ -80,12 +69,14 @@ setglobalvars()
 
 	getoptions "$@"
 
+	# make sure we're inside a git repo
+	git rev-parse -q > /dev/null 2>&1 || \
+		bail "$PROGNAME must be run inside a git repo." $E_DEFAULT
+
 	# Source helpful functions 
 	. $PROGDIR/../lib/lib-rpd.sh || \
 		bail "Failed to source lib-rpd.sh" $E_ENVIRONMENT
 
-	which grep > /dev/null || \
-		bail "which grep failed; ogstatus requires grep" $E_ENVIRONMENT
 }
 
 main()
@@ -100,7 +91,7 @@ main()
 
 
 		if [[ $line =~ $_commitregexp ]]; then
-			_commit=$(grep -oE "$_commitregexp" <<< $line)
+			_commit=${BASH_REMATCH[0]}
 		fi
 		
 		# extract rpd file path from line if there is an rpd file path
@@ -148,7 +139,7 @@ main()
 
 		OBJECT_TYPE_OLD="$_objtype"
 
-	done  < <(git log ${O_COLOR:+--color} --name-status ${O_ALL:+--all} $_gitref) | less -r -X
+	done  < <(git log --color --name-status $GITOPTS) | less -r -X
 
 	exit
 }

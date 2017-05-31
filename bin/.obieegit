@@ -1,5 +1,0 @@
-# Copy to $MW_HOME and update
-export BI_REPO=""             # path to Git repo; required
-export CATALOG_NAME=""        # defaults to "catalog" if not set or null
-export RPD_BASE_NAME=""       # defaults to "rpd" if not set or null
-export RPD_PASSWORD=""        # user is prompted if not set or null

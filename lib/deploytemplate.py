@@ -10,6 +10,13 @@ rpd_password = '%RPD_PASSWORD%'
 #+then user will be prompted for WebLogic user and password
 connect( url= weblogic_url )
 
+# Restart analyticsRes
+print "Restarting analyticsRes deployment..."
+progress=stopApplication('analyticsRes')
+progress=startApplication('analyticsRes')
+print "Restart analyticsRes complete."
+print ""
+
 # Switch to custom MBean tree
 domainCustom()
 

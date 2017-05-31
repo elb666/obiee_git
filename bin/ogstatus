@@ -5,7 +5,6 @@
 # OBIEE Git Status is git status plus extract rpd objects names
 # Requirements:
 #	lib-rpd.sh must be accessible in PROGDIR/../lib/
-# 	grep
 # 
 # By: Eric Brown eric_brown@harvard.edu
 # ===================================================================== #
@@ -29,6 +28,7 @@ getoptions()
 {
 	O_SHOWFILE=
 	O_NOCOLOR=
+	GITREF=
 
 	OPTIND=1
 	while getopts "nfh" OPT; do
@@ -39,6 +39,10 @@ getoptions()
 		n )
 			O_NOCOLOR=1
 				;;
+		h )
+			usage
+			exit
+			;;
 		* )
 			usage
 			exit $E_DEFAULT
@@ -46,7 +50,8 @@ getoptions()
 		esac
 	done
         shift $((OPTIND - 1))
-	_gitref="$1"
+
+	GITREF="$1"
 }
 
 bail()
@@ -74,6 +79,10 @@ setglobalvars()
 
 	getoptions "$@"
 
+	# make sure we're inside a git repo
+	git rev-parse -q > /dev/null 2>&1 || \
+		bail "$PROGNAME must be run inside a git repo." $E_DEFAULT
+
 	if [[ $O_NOCOLOR != 1 ]] ; then
 		ORIGCOLORSTAT="$(git config --get color.status)"
 		git config color.status always
@@ -83,8 +92,6 @@ setglobalvars()
 	. $PROGDIR/../lib/lib-rpd.sh || \
 		bail "Failed to source lib-rpd.sh" $E_ENVIRONMENT
 
-	which grep > /dev/null || \
-		bail "which grep failed; ogstatus requires grep" $E_ENVIRONMENT
 }
 
 main()
@@ -119,7 +126,7 @@ main()
 			# check for "reordered" files
 			if [[ $_objstatus == *modified ]] && \
 			    isreorder $_obj <(git show HEAD:./$_obj); then
-				_newline="${_newline/$'\t'modified: /$'\t'reordered:}"
+				_newline="${_newline/modified: /reordered:}"
 			fi
 		else
 			_newline="$line"
@@ -149,9 +156,10 @@ main()
 cleanup()
 {
 	if [[ $ORIGCOLORSTAT ]]; then
-		git config color.status $ORIGCOLORSTAT
+		git config color.status $ORIGCOLORSTAT > /dev/null 2>&1
 	else
-		git config --unset color.status
+	#	git config --unset color.status
+		git config --remove-section color > /dev/null 2>&1
 	fi
 }
 
