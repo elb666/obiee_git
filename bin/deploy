@@ -114,7 +114,7 @@ setandcheckothervariables()
 	CONFIG_FILES=( \
 		$MW_HOME/obieegit.conf
 		$MW_HOME/.wl_connect           \
-		$PROGDIR/../lib/lib-logging.sh \
+		$PROGDIR/../lib/lib-logging \
 		)
 	
 	# Variables required to be set by config files

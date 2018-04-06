@@ -1,0 +1,115 @@
+#!/bin/bash
+
+#-----------------------------------------------------------------------------
+#  CONFIGURATION SECTION
+# 
+ENV_ARRAY=(dev tst prod)
+BI_REPO="$ESS_OBI"
+ENVSWAP_HOME="$BI_REPO/repository/envswap"
+#
+#-----------------------------------------------------------------------------
+
+
+usage()
+{
+    cat <<-EOF
+	Usage: envswap [-h] [-v]
+
+	Swap out environment specific rpd files. User is prompted for environment <env>.
+	Filenames are read from file list and copied from ENVSWAP_HOME/<env> to BI_REPO.
+
+	Options:
+	  -h                       display this message and exit
+	  -v                       be verbose
+
+	Current configuration:
+	  Valid env values:        ${ENV_ARRAY[@]}
+	           BI_REPO:        \$ESS_OBI ($ESS_OBI)
+	      ENVSWAP_HOME:        \$BI_REPO/repository/envswap
+	         file list:        \$ENVSWAP_HOME/filelist.txt
+
+EOF
+}
+
+ismember()
+{ 
+	# ismember testcase list
+	# return 0 if testcase is a member of list
+	# else return 1
+
+	testcase="$1"
+	shift
+
+	for member in "$@"; do
+		[[ $testcase = $member ]] && return 0
+	done
+	return 1
+}
+
+O_VERBOSE=
+
+OPTIND=0
+while getopts 'vh' ARG; do
+	case $ARG in
+	v )
+		O_VERBOSE=1
+		;;
+	h )
+		usage
+		exit 0
+		;;
+	* )
+		usage
+		exit 1
+		;;
+	esac
+done
+shift $((OPTIND-1))
+
+# if there are any args after options are processed then error
+if (( $# > 0 )); then
+	echo "ERROR: too many arguments"
+	usage
+	exit 1
+fi
+
+filelist="$ENVSWAP_HOME/filelist.txt"
+if ! [[ -r $filelist ]]; then
+	echo "ERROR: $filelist doesn't exist." >&2
+	exit 1
+fi
+
+
+while :; do
+	echo -n "Which environment would you like to switch to (${ENV_ARRAY[@]})? "
+	read env
+	ismember "$env" "${ENV_ARRAY[@]}" && break
+	echo "Invalid response."
+done
+	
+echo -ne "\nCopying files..."
+(( O_VERBOSE > 0 )) && echo
+
+while read -r file; do 
+	# strip comments
+	file="${file%%#*}"
+
+	# fix Windows EOL and any trailing blanks not stripped because of EOL
+	if [[ $file =~ $'\r' ]]; then
+		file="$(sed 's/[[:blank:]]*$//'<<<$file)"
+	fi
+
+	# ignore blank files
+	[[ $file =~ ^[[:blank:]]*$ ]] && continue
+
+	command cp -f ${O_VERBOSE:+-v} "$ENVSWAP_HOME/$env/"$file "$BI_REPO/"$file;
+	if ! [[ $? = 0 ]]; then
+		echo -e "ERROR: File copy failed." >&2
+		exit 1
+	fi
+done < $filelist
+
+(( O_VERBOSE > 0 )) && echo
+echo -e "done!\n"
+
+exit 0

@@ -4,7 +4,7 @@
 # ===================================================================== #
 # OBIEE Git Status is git status plus extract rpd objects names
 # Requirements:
-#	lib-rpd.sh must be accessible in PROGDIR/../lib/
+#	lib-rpd must be accessible in PROGDIR/../lib/
 # 
 # By: Eric Brown eric_brown@harvard.edu
 # ===================================================================== #
@@ -89,8 +89,8 @@ setglobalvars()
 	fi
 
 	# Source helpful functions 
-	. $PROGDIR/../lib/lib-rpd.sh || \
-		bail "Failed to source lib-rpd.sh" $E_ENVIRONMENT
+	. $PROGDIR/../lib/lib-rpd || \
+		bail "Failed to source lib-rpd" $E_ENVIRONMENT
 
 }
 

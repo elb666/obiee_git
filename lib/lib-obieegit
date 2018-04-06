@@ -1,0 +1,63 @@
+#!/bin/bash
+# lib-obieegit
+
+# ===================================================================== #
+# Function library for OBIEE-Git related stuff
+# Requires lib-rpd to be in the same directory
+# 
+# By: Eric Brown eric_brown@harvard.edu
+# Created: Fri May 20 2016
+# ===================================================================== #
+
+
+getfuncs()
+{
+	[[ $1 ]] || return
+	grep -o "^.*()" $1
+}
+
+merge_a_to_b() 	#@ Usage: merge_a_to_b branchA branchB
+{		#@ Merge branch A into B (no ff, no commit)
+	local _branch_a="$1"
+	local _branch_b="$2"
+	local _regexp='^[[:digit:]]{5}$'
+
+	[[ $_branch_a =~ $_regexp ]] && _branch_a="sisagile-$_branch_a"
+	[[ $_branch_b =~ $_regexp ]] && _branch_b="sisagile-$_branch_b"
+
+	git checkout "$_branch_a" 
+	[[ $? != 0 ]] && return # return if checking out the branch failed
+	git pull 
+	git checkout "$_branch_b"
+	[[ $? != 0 ]] && return # return if checking out the branch failed
+	git pull 
+	git merge --no-ff --no-commit "$_branch_a" 
+	ogstatus
+}
+
+mergetomaster()	#@ Usage: mergetomaster [branch]
+{		#@ Merge branch (default current branch) into master (no ff, no commit)
+
+	local _branch="$1"
+
+	if ! [[ $_branch ]]; then
+		_branch=$(git rev-parse --abbrev-ref HEAD)
+	fi
+
+	merge_a_to_b $_branch master
+}
+
+xjirano()
+{
+	# extract unique jira ticket numbers (ie SISAGILE-12345) from stdin
+	tr siagle SIAGLE | egrep -o '[SIAGLE]{7,}-[0-9]*' | sort -u
+}
+
+co()
+{
+	if [[ $1 =~ [[:digit:]]* ]]; then
+		git co sisagile-$1;
+	else
+		git co $1;
+	fi
+}

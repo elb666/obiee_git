@@ -167,11 +167,17 @@ setandchecksbx()
 	local mw_home=
 
 	# get mw_home for the MW_USER
-	mw_home="$(sudo su - $MW_USER -c 'echo $MW_HOME')"
+	# use 'read' in case bash echos something when we su to mw_user (e.g.
+	# env variable values) this ensures that mw_home is set to the last line
+	# su sends to stdout, i.e. 'echo $MW_HOME'
+        while read -r line; do
+		mw_home=$line
+	done < <(sudo su - $MW_USER -c 'echo $MW_HOME')
+
 	[[ $mw_home ]] || \
 		bail "Failed to set MW_HOME. Make sure $MW_USER sets this environment variable."
 	
-	sudo su - $MW_USER -c 'ls $MW_HOME/obiee_git/ &> /dev/null' || \
+	sudo su - $MW_USER -c 'ls $MW_HOME/obiee_git/' &> /dev/null || \
 		bail "OBIEE Git directory (\$MW_HOME/obiee_git) for sandbox $SBXNO not found."
 
 

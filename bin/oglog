@@ -1,7 +1,7 @@
 #!/bin/bash
 # oglog
 # Requirements:
-#	lib-rpd.sh must be accessible in PROGDIR/../lib/
+#	lib-rpd must be accessible in PROGDIR/../lib/
 # 
 # By: Eric Brown eric_brown@harvard.edu
 # ===================================================================== #
@@ -74,8 +74,8 @@ setglobalvars()
 		bail "$PROGNAME must be run inside a git repo." $E_DEFAULT
 
 	# Source helpful functions 
-	. $PROGDIR/../lib/lib-rpd.sh || \
-		bail "Failed to source lib-rpd.sh" $E_ENVIRONMENT
+	. $PROGDIR/../lib/lib-rpd || \
+		bail "Failed to source lib-rpd" $E_ENVIRONMENT
 
 }
 
